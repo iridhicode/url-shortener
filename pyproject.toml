@@ -1,0 +1,15 @@
+[project]
+name = "url-shortener"
+version = "1.0.0"
+description = "URL Shortener API using FastAPI and SQLite"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

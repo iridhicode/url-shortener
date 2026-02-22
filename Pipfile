@@ -4,8 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+fastapi = "*"
+uvicorn = "*"
+sqlalchemy = ">=2.0"
+pydantic = ">=2.0"
 
 [dev-packages]
+pytest = "*"
+httpx = "*"
+ruff = "*"
 
 [requires]
 python_version = "3.11"
