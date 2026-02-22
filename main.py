@@ -1,13 +1,19 @@
-from fastapi import FastAPI
-from fastapi import FastAPI, HTTPException, Depends
+"""FastAPI application for the URL shortener service."""
+
+import logging
+from typing import Generator
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+
 import models.models as models
 from db.database import SessionLocal, engine
-from fastapi.responses import RedirectResponse
-
+from models.request import ShortenResponse, URLRequest
 from utils.db import create_url, get_url_by_short_id
-from utils.common import generate_shorten_url
-from models.request import URLRequest
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="URL Shortener",
@@ -15,10 +21,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 models.Base.metadata.create_all(bind=engine)
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
+    """Yield a database session and ensure it is closed after use."""
     db = SessionLocal()
     try:
         yield db
@@ -26,33 +41,47 @@ def get_db():
         db.close()
 
 
-@app.post("/shorten", tags=["URL Shortener"])
-def shorten_url_func(url_request: URLRequest, db: Session = Depends(get_db)):
+@app.get("/health", tags=["Health"])
+def health() -> dict[str, str]:
+    """Return a simple health-check response."""
+    return {"status": "ok"}
+
+
+@app.post("/shorten", tags=["URL Shortener"], response_model=ShortenResponse)
+def shorten_url_func(
+    url_request: URLRequest, db: Session = Depends(get_db)
+) -> ShortenResponse:
+    """Shorten a URL and return the generated short ID."""
     try:
-        long_url = url_request.url
-        short_id = generate_shorten_url()
-        create_url(db, short_id, long_url)
-        return {
-            "short_url": short_id,
-            "status": "success"
-        }
+        long_url = str(url_request.url)
+        db_url = create_url(db, long_url)
+        return ShortenResponse(short_url=db_url.short_id, status="success")
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error occurred while shortening URL: {str(e)}")
+        logger.exception("Error occurred while shortening URL: %s", e)
         raise HTTPException(
-            status_code=500, detail=f"Internal Server Error while trying to shorten the URL")
+            status_code=500,
+            detail="Internal Server Error while trying to shorten the URL",
+        )
 
 
 @app.get("/{short_id}", tags=["URL Shortener"])
-def redirect_url(short_id: str, db: Session = Depends(get_db)):
+def redirect_url(short_id: str, db: Session = Depends(get_db)) -> RedirectResponse:
+    """Redirect the caller to the original long URL for the given short ID."""
     try:
         db_url = get_url_by_short_id(db, short_id)
-        if db_url:
-            if not db_url.long_url.startswith("http"):
-                db_url.long_url = "https://" + db_url.long_url
-            return RedirectResponse(url=db_url.long_url)
-        else:
+        if not db_url:
             raise HTTPException(status_code=404, detail="URL not found")
+        long_url = db_url.long_url
+        if not long_url.startswith("http"):
+            long_url = "https://" + long_url
+        return RedirectResponse(url=long_url)
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error occurred while redirecting URL: {str(e)}")
+        logger.exception("Error occurred while redirecting URL: %s", e)
         raise HTTPException(
-            status_code=500, detail=f"Internal Server Error while calling the redirect URL")
+            status_code=500,
+            detail="Internal Server Error while calling the redirect URL",
+        )
